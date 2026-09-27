@@ -2,6 +2,9 @@
 
 ## Project Members
 Fatma Abdulahi
+
 Marcus Rossing
+
 Stacy Bruch
+
 Zachary Wright
