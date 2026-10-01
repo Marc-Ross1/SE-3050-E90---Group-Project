@@ -15,8 +15,6 @@ Zachary Wright
 
 
 
-
-
 # Farmers Market & Vendor Management System
 
 ## 1. Project Overview
@@ -56,8 +54,7 @@ This web platform helps local farmers' markets manage operations and connect wit
 ## 4. Database Rules & Relational Scope
 1. Every individual line-item order must map back to a valid, active product listing.
 2. Every product listing must belong to an authenticated, verified vendor profile.
-3. Vendor stall allocations must be tracked alongside specific, scheduled calendar dates.
-4. Every multi-vendor pre-order must be explicitly pinned to a designated physical market location.
+3. Vendors are assigned to specific stalls within a market.
 
 ---
 
@@ -67,34 +64,33 @@ This web platform helps local farmers' markets manage operations and connect wit
 
 #### MARKETS
 * `market_id` (int, PK): Unique identifier for the market location.
-* `name` (varchar, NOT NULL): The public name of the market.
-* `location` (varchar, NOT NULL): The physical address of the venue.
-* `operating_hours` (varchar): The active operating schedule window.
-* `contact_email` (varchar): Contact address for the managing organizer.
+* `name` (string, NOT NULL): The public name of the market.
+* `location` (string, NOT NULL): The physical address of the venue.
+* `operating_hours` (string): The active operating schedule window.
+* `contact_email` (string): Contact address for the managing organizer.
 
 #### VENDORS
 * `vendor_id` (int, PK): Unique identifier for the business entity.
-* `business_name` (varchar, NOT NULL): The commercial or farm name.
-* `owner_name` (varchar): Operator point of contact name.
-* `phone` (varchar): Primary commercial phone number.
-* `email` (varchar, UNIQUE): Registered authentication email address.
+* `business_name` (string, NOT NULL): The commercial or farm name.
+* `owner_name` (string): Operator point of contact name.
+* `phone` (string): Primary commercial phone number.
+* `email` (string): Registered authentication email address.
 
 #### PRODUCTS
 * `product_id` (int, PK): Unique identifier for the product.
 * `vendor_id` (int, FK referencing VENDORS.vendor_id): Establishes account ownership.
-* `name` (varchar, NOT NULL): Public description name of the item.
-* `description` (varchar): Detailed overview of ingredients, origins, or processes.
+* `name` (string, NOT NULL): Public description name of the item.
+* `description` (string): Detailed overview of ingredients, origins, or processes.
 * `price` (decimal, NOT NULL): Active storefront price calculation point.
-* `stock_quantity` (int, DEFAULT 0): Remaining real-time volume in inventory.
-* `category` (varchar): Data taxonomy category.
+* `stock_quantity` (int): Remaining real-time volume in inventory.
+* `category` (string): Data taxonomy category.
 
 #### ORDERS
 * `order_id` (int, PK): Unique identifier for the transaction invoice.
-* `market_id` (int, FK referencing MARKETS.market_id): Identifies physical pickup location.
 * `order_date` (datetime): Timestamp registering when the purchase occurred.
-* `customer_name` (varchar, NOT NULL): Pickup customer identity.
-* `customer_email` (varchar): Contact email for order confirmations.
-* `status` (varchar): Current workflow point.
+* `customer_name` (string, NOT NULL): Pickup customer identity.
+* `customer_email` (string): Contact email for order confirmations.
+* `status` (string): Current workflow point.
 * `total_amount` (decimal): Combined financial summary of all inner elements.
 
 ### Relationship & Intersection Tables
@@ -103,8 +99,7 @@ This web platform helps local farmers' markets manage operations and connect wit
 * `stall_id` (int, PK): Unique identifier for the assignment entry.
 * `market_id` (int, FK referencing MARKETS.market_id): Target market venue.
 * `vendor_id` (int, FK referencing VENDORS.vendor_id): Assigned merchant entity.
-* `stall_number` (varchar, NOT NULL): Designated booth identification tag.
-* `market_date` (date, NOT NULL): The explicit calendar date this assignment applies to.
+* `stall_number` (string, NOT NULL): Designated booth identification tag.
 
 #### ORDER_ITEMS
 * `item_id` (int, PK): Distinct line-item record row tracker.
@@ -112,3 +107,5 @@ This web platform helps local farmers' markets manage operations and connect wit
 * `product_id` (int, FK referencing PRODUCTS.product_id): Inventory asset purchased.
 * `quantity` (int, NOT NULL): Number of units purchased.
 * `price_at_purchase` (decimal, NOT NULL): The snapshot price at checkout.
+
+
