@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 import pymysql
 import time
 from datetime import datetime
+import re
 
 # Loads all the variables from the .env file into the environment variables so that the database login credentials can be accessed securely without hardcoding them into the code.
 load_dotenv()
@@ -32,12 +33,11 @@ DB_DATABASE= os.getenv('DB_DATABASE')
 # --- GLOBAL Variables ---
 ## Tracks latest item, table, frame and tree
 selected_item = None
-selected_table = None
 results_frame = None
 selected_tree = None
 
 ## Holds a cache for the display, vendor, and products query to save database and network resources.
-display_cache = None
+markets_cache = {}
 select_vendor_cache = {}
 search_products_cache = {}
 
@@ -76,7 +76,7 @@ def run_query(query, params=None):
 
 ## Clears all non main GUI elements.
 def clear_results():
-    global selected_item, selected_table, results_frame, selected_tree
+    global selected_item, results_frame, selected_tree
 
     # Destroys results_frame to remove all GUI elements in it.
     if results_frame:
@@ -94,8 +94,19 @@ def clear_results():
 
     # Reset global variables.   
     selected_item = None
-    selected_table = None
     selected_tree = None
+
+## Checks when the last time a cache was cached and clears it if it's been longer than the global cache_reset_time value.
+## Also sets the cache to a given clear_type when the cache is cleared.
+def update_cache(last_cached, cache, clear_type):
+    global cache_reset_time
+    if time.time() - last_cached > cache_reset_time:
+        last_cached = time.time()  # Update the timestamp of the last call.
+        
+         # Clear the cache. 
+        cache = clear_type
+
+    return last_cached, cache
 
 ## Sets up the text fields so when there's no text in the box there is default text. This text disappears when the text box is selected. 
 def search_entry_placeholder(search_entry, text):
@@ -139,12 +150,31 @@ def max_height(height, max):
 ## --- Markets Section ---
 def display_markets():
     clear_results()  # Clear previous results before displaying new ones
-    global results_frame, display_cache, selected_table, selected_tree, last_cached_markets, cache_reset_time
+    global results_frame, markets_cache, selected_tree, last_cached_markets
 
-    if time.time() - last_cached_markets > cache_reset_time:  # If more than 5 minutes have passed since the last call, clear the cache
-        last_cached_markets = time.time()  # Update the timestamp of the last call
-        display_cache = None  # Clear the display cache
-   
+    # Checks last time cache was cleared. 
+    last_cached_markets, markets_cache = update_cache(last_cached_markets, markets_cache, None)
+
+    # Check if there's a cache.
+    if markets_cache is None:
+        
+        # Runs the query.
+        query = """ 
+                SELECT market_id, name, location, operating_hours, contact_email 
+                FROM Markets 
+                ORDER BY name
+            """
+        markets = run_query(query)
+        
+        if markets is None:
+            messagebox.showerror("Database Error", "Could not retrieve markets from the database.")
+            return
+        markets_cache = markets  # Store the markets data in the cache
+        last_cached_markets = time.time() 
+    markets = markets_cache  # Use the cached data
+
+
+   # Set up GUI
     button_clear_results.pack_forget()
     button_selected.pack(side=tk.LEFT, padx=(0, 20))
     button_clear_results.pack(side=tk.LEFT, padx=(0, 20))
@@ -155,44 +185,25 @@ def display_markets():
     results_frame = tk.Frame(root)
     results_frame.pack(anchor=tk.E, fill=tk.X)
 
+    markets_table_label = tk.Label(results_frame, text="Farmers Markets", font=("Helvetica", 10))
+    markets_table_label.pack(padx=20, anchor=tk.W)
+
     columns = ("Market Name", "Location", "Operating Hours", "Contact Email")
     tree = ttk.Treeview(results_frame, columns=columns, show="headings")
 
     for col in columns:
         tree.heading(col, text=col)
         tree.column(col, width=150)
-     
-    
-    if display_cache is None:
-        query = """ 
-                SELECT market_id, name, location, operating_hours, contact_email 
-                FROM Markets 
-                ORDER BY name
-            """
-        markets = run_query(query)
-        if markets is None:
-            messagebox.showerror("Database Error", "Could not retrieve markets from the database.")
-            return
-        display_cache = markets  # Store the markets data in the cache
-        last_cached_markets = time.time() 
-    markets = display_cache  # Use the cached data
-    
-    selected_table = "markets"  # Set the selected table to "markets"
-    selected_tree = tree  # Store the selected treeview
 
     for market in markets:
-        
         tree.insert("", "end", values=market[1:], iid=str(market[0]))
 
-    tree.pack(pady=20, padx=20, fill=tk.BOTH, expand=True)    
+    tree.pack(padx=20, fill=tk.BOTH, expand=True)    
 
+    selected_tree = tree  # Store the selected treeview
 
 def get_selected_market():
-    global results_frame, selected_item, selected_table, selected_tree
-
-    if selected_table is None:
-        messagebox.showwarning("No Table Selected", "Please display a table before selecting an item.")
-        return None
+    global results_frame, selected_item, selected_tree
     
     selected_item = selected_tree.selection()
     if not selected_item:
@@ -207,18 +218,36 @@ def get_selected_market():
         results_frame.destroy()
         results_frame = None
 
-    if selected_table == "markets":
-        select_market(market_id, market_values)
+    select_market(market_id, market_values)
 
 
 def select_market(market_id, market_values):
-    button_selected.config(state=tk.DISABLED)  
+    global results_frame, last_cached_vendors, select_vendor_cache
 
-    global selected_table, results_frame, last_cached_vendors, select_vendor_cache, cache_reset_time
+    # Checks last time cache was cleared. 
+    last_cached_vendors, select_vendor_cache = update_cache(last_cached_vendors, select_vendor_cache, {})
 
-    if time.time() - last_cached_vendors > cache_reset_time:
-        last_cached_vendors = time.time()
-        select_vendor_cache = {}
+    # Check if there's a cache.
+    if market_id not in select_vendor_cache:
+        
+        # Runs query.
+        query = """
+                SELECT v.vendor_id, business_name, owner_name, phone, email, stall_number
+                FROM Vendors v
+                JOIN Market_Stalls ms ON ms.vendor_id = v.vendor_id
+                WHERE market_id = %s;
+        """
+        vendors_table = run_query(query, (market_id,))
+        
+        if vendors_table is None or vendors_table == ():
+            messagebox.showerror("Database Error", "Could not retrieve vendors from the database.")
+            return
+        select_vendor_cache[market_id] = vendors_table
+        last_cached_vendors = time.time() 
+    vendors_table = select_vendor_cache[market_id]
+
+    # Set up GUI
+    button_selected.config(state=tk.DISABLED) 
 
     results_frame = tk.Frame(root)
     results_frame.pack(anchor=tk.E, fill=tk.X)
@@ -239,24 +268,6 @@ def select_market(market_id, market_values):
     for col in columns:
         market_tree.heading(col, text=col)
         market_tree.column(col, width=150)
-
-    if market_id not in select_vendor_cache:
-        query = """
-                SELECT v.vendor_id, business_name, owner_name, phone, email, stall_number
-                FROM Vendors v
-                JOIN Market_Stalls ms ON ms.vendor_id = v.vendor_id
-                WHERE market_id = %s;
-            """
-
-        vendors_table = run_query(query, (market_id,))
-        if vendors_table is None:
-            messagebox.showerror("Database Error", "Could not retrieve vendors from the database.")
-            return
-        select_vendor_cache[market_id] = vendors_table
-        last_cached_vendors = time.time() 
-    else:
-        vendors_table = select_vendor_cache[market_id]
-   
 
     vendors_frame = tk.Frame(results_frame)
     vendors_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0))
@@ -280,12 +291,8 @@ def select_market(market_id, market_values):
 
 ## --- Products Search Section ---
 def select_product():
-    global selected_item, selected_tree, results_frame, selected_table
+    global selected_item, selected_tree, results_frame
     selected_item = selected_tree.selection()
-
-    if selected_table is None:
-        messagebox.showwarning("No Table Selected", "Please display a table before selecting an item.")
-        return None
     
     if not selected_item:
         messagebox.showwarning("No Selection", "Please select a market from the list.")
@@ -354,39 +361,28 @@ def select_product():
     search_entry_placeholder(pre_order_customer_name, "Name: (First Last)")
     search_entry_placeholder(pre_order_customer_email, "Email: (example@gmail.com)")
 
-    # customer_name, customer_email, price
+
     button_pre_order = tk.Button(place_pre_order_frame, text="Place Pre Order", command=lambda: place_pre_order(
         product_id, 
         pre_order_date.get(), 
         pre_order_quantity.get(), 
         pre_order_customer_name.get(), 
-        pre_order_customer_email.get(), 
-        product_values[1]
+        pre_order_customer_email.get()
         ))
     button_pre_order.pack(padx=(0, 20), side=tk.RIGHT)
 
 
 def perform_search(search_term):
     clear_results()  # Clear previous results before displaying new ones
-    global results_frame, search_products_cache, last_cached_products, selected_table, selected_tree, cache_reset_time
-  
-    if time.time() - last_cached_products > cache_reset_time:
-        last_cached_products = time.time()
-        search_products_cache = {}
+    global results_frame, search_products_cache, last_cached_products, selected_tree
 
+    # Checks last time cache was cleared. 
+    last_cached_products, search_products_cache = update_cache(last_cached_products, search_products_cache, {})
 
-    button_clear_results.pack_forget()
-    button_selected_product.pack(side=tk.LEFT, padx=(0, 20))
-    button_clear_results.pack(side=tk.LEFT, padx=(0, 20))
-
-    button_selected_product.config(state=tk.NORMAL)  
-    button_clear_results.config(state=tk.NORMAL) 
-
-    results_frame = tk.Frame(root)
-    results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
-
-
+    # Makes a lower case search_term variable.
     lowercase_search_term = search_term.lower()
+    
+    # Check if there's a cache.
     if lowercase_search_term not in search_products_cache:
         query = """
                 SELECT product_id, p.name, price, stock_quantity, category, business_name, m.name, description
@@ -408,6 +404,16 @@ def perform_search(search_term):
         last_cached_products = time.time() 
     products_table = search_products_cache[lowercase_search_term]
 
+    # Set up GUI
+    button_clear_results.pack_forget()
+    button_selected_product.pack(side=tk.LEFT, padx=(0, 20))
+    button_clear_results.pack(side=tk.LEFT, padx=(0, 20))
+
+    button_selected_product.config(state=tk.NORMAL)  
+    button_clear_results.config(state=tk.NORMAL) 
+
+    results_frame = tk.Frame(root)
+    results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
    
     columns = ("Product Name", "Price", "Stock Quantity", "Category", "Vendor Name", "Market Name")
     products_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=max_height(len(products_table), 30))
@@ -421,16 +427,16 @@ def perform_search(search_term):
     for product in products_table:
         products_tree.insert("", "end", values=product[1:7], iid=str(product[0]), tags=(product[7],))
     
-    selected_table = "products"
-    selected_tree = products_tree
+    selected_tree = products_tree # Update Global selected_tree 
 
 
 def search_products():
     clear_results()  # Clear previous results before displaying new ones
-    global selected_table, results_frame, last_cached_vendors, select_vendor_cache
+    global results_frame, last_cached_vendors, select_vendor_cache
     
     root.focus()
-    
+
+    # Set up GUI
     button_clear_results.config(state=tk.NORMAL)
 
     results_frame = tk.Frame(root)
@@ -450,15 +456,36 @@ def search_products():
     search_entry_placeholder(search_entry, "Search Products...")
 
 
-
-## --- Place Pre Order Section ---
-def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_name, customer_email, price):
+### --- Place Pre Order Section ---
+def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_name, customer_email):
     connection = None
     query = ""
     params = None
 
+    # Regex for input formats.
+    regex_pre_order_date = r"^\d{4}-(?:0[1-9]|1[0-2]),(?:0[1-9]|[12]\d|3[01])$"
+    regex_pre_order_quantity = r"^\d+$"
+    regex_customer_name = r"^[A-Za-zÀ-ÿ]+(?: [A-Za-zÀ-ÿ]+)+$"
+    regex_customer_email = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
+
+
     order_result = False
-    try: 
+    try:
+
+        # Checks for format exceptions.
+        if not re.match(regex_pre_order_date, pre_order_date.strip()):
+            raise Exception("Invalid Order Date Input: Must be valid date format and must have valid months and days (yyyy-mm-dd).")
+
+        if not re.match(regex_pre_order_quantity, pre_order_quantity.strip()):
+            raise Exception("Invalid Quanitiy Input: Must be whole number (number).")
+
+        if not re.match(regex_customer_name, customer_name.strip()):
+            raise Exception("Invalid Quanitiy Input: Must be first name and last name (first last).")
+
+        if not re.match(regex_customer_email, customer_email.strip()):
+            raise Exception("Invalid Quanitiy Input: Must be valid email format (email@email.com).")
+        
+
         connection = pymysql.connect(
             host=DB_HOST,
             port=int(DB_PORT),
@@ -473,6 +500,8 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
         product_name = None
         
         with connection.cursor() as cursor:
+            
+            # Gets the stock_quantity, price and name
             query = """
                 SELECT stock_quantity, price, name
                 FROM products
@@ -483,34 +512,38 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
             cursor.execute(query, params)
             result = cursor.fetchall()
 
+            # Checks for exceptions
             if not result:
                 raise Exception("No product was found.")
 
             product = result[0]
             if not product:
                 raise Exception("No product was found.")
-            
+
+
+            # Creats local variables for stock_quantity, price and name.
             current_quantity = product[0]
             price = product[1]
             product_name = product[2]
 
+            # Checks for exceptions.
             if current_quantity < int(pre_order_quantity):
                 raise Exception(f"Current quantity ({current_quantity}) of ({product_name}) is less than pre order quantity requested ({pre_order_quantity}).")
 
+            # Calculates total amount of order.
             total_amount = int(pre_order_quantity) * price
             
-
+            # Creates an order.
             query = """
                 INSERT INTO Orders (order_date, customer_name, customer_email, status, total_amount)
                 VALUES (%s, %s, %s, 'Pending', %s)
             """
             date_time = datetime.strptime(pre_order_date, "%Y-%m-%d")
-
             params = (date_time, customer_name, customer_email, total_amount)
 
             cursor.execute(query, params)
 
-
+            # Creates an Order_Items
             order_id = cursor.lastrowid
             query = """
                 INSERT INTO Order_Items (order_id, product_id, quantity, price_at_purchase)
@@ -519,7 +552,7 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
             params = (order_id, product_id, int(pre_order_quantity), price)
             cursor.execute(query, params)
 
-
+            # Updates the stock_quantity of the product that had a pre-order placed for it.
             query = """
                 UPDATE Products
                 SET stock_quantity = stock_quantity - %s
@@ -528,11 +561,12 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
             params = (int(pre_order_quantity), product_id)
     
             cursor.execute(query, params)
+
+        # Commits transaction.
         connection.commit()
         
         order_result = [True, f"Pre order for {product_name} was successfully placed."]
-        
-
+    
     except Exception as e:
         if connection:
             connection.rollback()
@@ -542,11 +576,15 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
             connection.close()
         
         clear_results()
-        button_clear_results.config(state=tk.NORMAL)
         global results_frame
+
+        # Set up GUI for order result.
+        button_clear_results.config(state=tk.NORMAL)
         results_frame = tk.Frame(root)
-        results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
-        lable_pre_order_result = tk.Label(results_frame, text=f"{order_result[1]}", font=("Helvetica", 12))
+        results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0))
+
+        # Show user the result.
+        lable_pre_order_result = tk.Label(results_frame, text=f"{order_result[1]}", font=("Helvetica", 12, "bold"))
         lable_pre_order_result.pack(pady=10, padx=(20,0))
 
 # ----- End of Main Functions -----
