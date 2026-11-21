@@ -7,6 +7,7 @@ Marcus Rossing
 
 Stacy Bruch
 
+~~Zachary Wright~~: Has been removed from the group as he has made no contributions to the project and has not been in contact with the group for over 2 months. 
 
 ## [GitHub Projects Board](https://github.com/users/Marc-Ross1/projects/1/views/2)
 <img width="1488" height="908" alt="image" src="https://github.com/user-attachments/assets/a69607da-e4f4-489d-8b04-81c7da39808b" />
