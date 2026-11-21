@@ -1,4 +1,15 @@
-# Written by Marcus Rossing
+# WRITTEN BY MARCUS ROSSING
+
+# DESCRIPTION:
+# This application is used to connect to a farmers market database and excecute premade queires.
+#
+# The main functionalities are: 
+# 1) displaying markets.
+# 2) viewing details for any of the markets.
+# 3) Searching for product.
+# 4) Placing a pre-order for a specific product.
+
+# IMPORTANT: You cannot connect to the database if you do not have the .env file.
 
 import os
 import tkinter as tk
@@ -8,7 +19,7 @@ import pymysql
 import time
 from datetime import datetime
 
-# Loads all the variables from the .env file into the environment variables so that the database login credentials can be accessed securely without hardcoding them into the code
+# Loads all the variables from the .env file into the environment variables so that the database login credentials can be accessed securely without hardcoding them into the code.
 load_dotenv()
 
 DB_HOST= os.getenv('DB_HOST')
@@ -18,8 +29,28 @@ DB_PASSWORD= os.getenv('DB_PASSWORD')
 DB_DATABASE= os.getenv('DB_DATABASE')
 
 
+# --- GLOBAL Variables ---
+## Tracks latest item, table, frame and tree
+selected_item = None
+selected_table = None
+results_frame = None
+selected_tree = None
 
-# Reusable function to run a query that returns results of the query
+## Holds a cache for the display, vendor, and products query to save database and network resources.
+display_cache = None
+select_vendor_cache = {}
+search_products_cache = {}
+
+## Tracks the time when each market cache was made.
+last_cached_markets = 0
+last_cached_vendors = 0
+last_cached_products = 0
+
+cache_reset_time = 60 * 5 # 5 Mintues
+
+
+# --- Reusable/Helper functions ---
+## Runs and returns the results of the query
 def run_query(query, params=None):
     try: 
         
@@ -43,44 +74,74 @@ def run_query(query, params=None):
         print(f"Error connecting to the database: {e} \n Please check your database connection settings in the .env file, and reload the application.")
         return None
 
-
-# --- Market Display Functions ---
-## Clears the treeview and disables the clear button
-selected_item = None  # Global variable to store the selected item
-selected_table = None  # Global variable to store the selected table
-results_frame = None  # Global variable to store the selected frame
-selected_tree = None  # Global variable to store the selected treeview
-
+## Clears all non main GUI elements.
 def clear_results():
     global selected_item, selected_table, results_frame, selected_tree
 
+    # Destroys results_frame to remove all GUI elements in it.
     if results_frame:
         results_frame.destroy()
         results_frame = None
 
-
+    # Disables the buttons.
     button_selected.config(state=tk.DISABLED) 
-    button_selected.pack_forget()  # Hide the button when clearing results
     button_selected_product.config(state=tk.DISABLED) 
-    button_selected_product.pack_forget()  # Hide the button when clearing results
-
     button_clear_results.config(state=tk.DISABLED)
-    selected_item = None  # Reset the selected item when clearing results
-    selected_table = None  # Reset the selected table when clearing results
+
+    # Hides buttons.
+    button_selected.pack_forget()
+    button_selected_product.pack_forget()
+
+    # Reset global variables.   
+    selected_item = None
+    selected_table = None
+    selected_tree = None
+
+## Sets up the text fields so when there's no text in the box there is default text. This text disappears when the text box is selected. 
+def search_entry_placeholder(search_entry, text):
+    search_entry.insert(0, text)
+    search_entry.config(fg="grey")
+
+    def focused(event):
+        if search_entry.get() == text:
+            search_entry.delete(0, tk.END)
+            search_entry.config(fg="black")
+
+    def un_focused(event):
+        if not search_entry.get():
+            search_entry.insert(0, text)
+            search_entry.config(fg="grey")
+
+    search_entry.bind("<FocusIn>", focused)
+    search_entry.bind("<FocusOut>", un_focused)
+
+## Tracks when the root and any text buttons are clicked on/off
+def unfocus(root, buttons):
+    focused = False
+
+    def on_click(event):
+        for button in buttons:
+            if event.widget == button:
+                return
+        root.focus_set()
+
+    root.bind("<Button-1>", on_click)
+
+## Limits the height to a set max
+def max_height(height, max):
+    if height > max:
+        return max 
+    return height
 
 
+# ----- Main Functions -----
 
-## Returns and displays the markets from the database
-display_cache = None  # Cache to store the markets data
-select_vendor_cache = {}  
-search_products_cache = {}
-
-last_cached_markets = 0  # Timestamp of the last time the function was called
+## --- Markets Section ---
 def display_markets():
     clear_results()  # Clear previous results before displaying new ones
-    global results_frame, display_cache, selected_table, selected_tree, last_cached_markets
+    global results_frame, display_cache, selected_table, selected_tree, last_cached_markets, cache_reset_time
 
-    if time.time() - last_cached_markets > 60 * 5:  # If more than 5 minutes have passed since the last call, clear the cache
+    if time.time() - last_cached_markets > cache_reset_time:  # If more than 5 minutes have passed since the last call, clear the cache
         last_cached_markets = time.time()  # Update the timestamp of the last call
         display_cache = None  # Clear the display cache
    
@@ -119,16 +180,13 @@ def display_markets():
     selected_table = "markets"  # Set the selected table to "markets"
     selected_tree = tree  # Store the selected treeview
 
-    
-
-
     for market in markets:
         
         tree.insert("", "end", values=market[1:], iid=str(market[0]))
 
     tree.pack(pady=20, padx=20, fill=tk.BOTH, expand=True)    
 
-## 
+
 def get_selected_market():
     global results_frame, selected_item, selected_table, selected_tree
 
@@ -142,8 +200,9 @@ def get_selected_market():
         return None
 
     market_id = selected_item[0]
+   
     market_values = selected_tree.item(selected_item, "values")
-
+    
     if results_frame:
         results_frame.destroy()
         results_frame = None
@@ -152,18 +211,12 @@ def get_selected_market():
         select_market(market_id, market_values)
 
 
-def max_height(height):
-    if height > 5:
-        return 5 
-    return height
-
-last_cached_vendors = 0
 def select_market(market_id, market_values):
     button_selected.config(state=tk.DISABLED)  
 
-    global selected_table, results_frame, last_cached_vendors, select_vendor_cache
+    global selected_table, results_frame, last_cached_vendors, select_vendor_cache, cache_reset_time
 
-    if time.time() - last_cached_vendors > 60 * 5:
+    if time.time() - last_cached_vendors > cache_reset_time:
         last_cached_vendors = time.time()
         select_vendor_cache = {}
 
@@ -212,7 +265,7 @@ def select_market(market_id, market_values):
     vendors_table_label.pack(padx=20, anchor=tk.W)
 
     columns = ("Business Name", "Owner Name", "Phone Number", "Email", "Stall Number")
-    vendors_tree = ttk.Treeview(vendors_frame, columns=columns, show="headings", height=max_height(len(vendors_table)), selectmode="none")
+    vendors_tree = ttk.Treeview(vendors_frame, columns=columns, show="headings", height=max_height(len(vendors_table), 15), selectmode="none")
 
     for vendor in vendors_table:
         vendors_tree.insert("", "end", values=vendor[1:], iid=str(vendor[0]))
@@ -224,25 +277,181 @@ def select_market(market_id, market_values):
         vendors_tree.column(col, width=150)
 
 
-def search_entry_placeholder(search_entry, text):
-    search_entry.insert(0, text)
-    search_entry.config(fg="grey")
 
-    def focused(event):
-        if search_entry.get() == text:
-            search_entry.delete(0, tk.END)
-            search_entry.config(fg="black")
+## --- Products Search Section ---
+def select_product():
+    global selected_item, selected_tree, results_frame, selected_table
+    selected_item = selected_tree.selection()
 
-    def un_focused(event):
-        if not search_entry.get():
-            search_entry.insert(0, text)
-            search_entry.config(fg="grey")
+    if selected_table is None:
+        messagebox.showwarning("No Table Selected", "Please display a table before selecting an item.")
+        return None
+    
+    if not selected_item:
+        messagebox.showwarning("No Selection", "Please select a market from the list.")
+        return None
+    
+    product_id = selected_item[0]
+    product_values = selected_tree.item(selected_item, "values")
 
-    search_entry.bind("<FocusIn>", focused)
-    search_entry.bind("<FocusOut>", un_focused)
+    tags = selected_tree.item(selected_item, "tags")
+    description = tags[0] if tags else "No description available."
+
+    if results_frame:
+            results_frame.destroy()
+            results_frame = None
+
+    button_selected_product.pack_forget()
+    button_selected_product.config(state=tk.DISABLED)
+    
+
+    results_frame = tk.Frame(root)
+    results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
+
+    columns = ("Product Name", "Price", "Stock Quantity", "Category", "Vendor Name", "Market Name")
+    products_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=1, selectmode="none")
+
+    products_tree.pack(padx=20, fill=tk.X)
+
+    for col in columns:
+        products_tree.heading(col, text=col)
+        products_tree.column(col, width=150)
+
+
+    products_tree.insert("", "end", values=product_values[0:6], iid=str(product_id))
+    
+    description_columns = ("Description",)
+    products_description_tree = ttk.Treeview(results_frame, columns=description_columns, show="headings", height=max_height(int( (len(description)/50)+ 1 ), 10), selectmode="none")
+
+    products_description_tree.heading(description_columns, text=description_columns, anchor=tk.W)
+    products_description_tree.column(description_columns, width=150, anchor=tk.W)
+        
+    products_description_tree.insert("", "end", values=(description,), iid=str(product_id))
+
+    products_description_tree.pack(pady=(0, 10), padx=20, fill=tk.X)
+
+    place_pre_order_frame = tk.Frame(results_frame)
+    place_pre_order_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0))
+    
+    root.focus()
+
+    pre_order_date = tk.Entry(place_pre_order_frame, width=30, font=("Helvetica", 11))
+    pre_order_date.pack(padx=(20, 0), side=tk.LEFT)
+
+    pre_order_quantity = tk.Entry(place_pre_order_frame, width=20, font=("Helvetica", 11))
+    pre_order_quantity.pack(padx=(20, 0), side=tk.LEFT)
+
+    pre_order_customer_name = tk.Entry(place_pre_order_frame, width=30, font=("Helvetica", 11))
+    pre_order_customer_name.pack(padx=(20, 0), side=tk.LEFT)
+
+    pre_order_customer_email = tk.Entry(place_pre_order_frame, width=40, font=("Helvetica", 11))
+    pre_order_customer_email.pack(padx=(20, 0), side=tk.LEFT)
+
+    unfocus(root, {pre_order_date, pre_order_quantity, pre_order_customer_name, pre_order_customer_email})
+
+    search_entry_placeholder(pre_order_date, "Date: (yyyy-mm-dd)")
+    search_entry_placeholder(pre_order_quantity, "Quantity: (number)")
+    search_entry_placeholder(pre_order_customer_name, "Name: (First Last)")
+    search_entry_placeholder(pre_order_customer_email, "Email: (example@gmail.com)")
+
+    # customer_name, customer_email, price
+    button_pre_order = tk.Button(place_pre_order_frame, text="Place Pre Order", command=lambda: place_pre_order(
+        product_id, 
+        pre_order_date.get(), 
+        pre_order_quantity.get(), 
+        pre_order_customer_name.get(), 
+        pre_order_customer_email.get(), 
+        product_values[1]
+        ))
+    button_pre_order.pack(padx=(0, 20), side=tk.RIGHT)
+
+
+def perform_search(search_term):
+    clear_results()  # Clear previous results before displaying new ones
+    global results_frame, search_products_cache, last_cached_products, selected_table, selected_tree, cache_reset_time
+  
+    if time.time() - last_cached_products > cache_reset_time:
+        last_cached_products = time.time()
+        search_products_cache = {}
+
+
+    button_clear_results.pack_forget()
+    button_selected_product.pack(side=tk.LEFT, padx=(0, 20))
+    button_clear_results.pack(side=tk.LEFT, padx=(0, 20))
+
+    button_selected_product.config(state=tk.NORMAL)  
+    button_clear_results.config(state=tk.NORMAL) 
+
+    results_frame = tk.Frame(root)
+    results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
+
+
+    lowercase_search_term = search_term.lower()
+    if lowercase_search_term not in search_products_cache:
+        query = """
+                SELECT product_id, p.name, price, stock_quantity, category, business_name, m.name, description
+                FROM Products p
+                JOIN Vendors v ON v.vendor_id = p.vendor_id
+                JOIN Market_Stalls ms ON ms.vendor_id = v.vendor_id
+                JOIN Markets m ON m.market_id = ms.market_id
+                WHERE LOWER(p.name) LIKE %s OR LOWER(description) LIKE %s OR LOWER(category) LIKE %s
+                ORDER BY p.name;
+            """
+        products_table = run_query(query, (f"%{lowercase_search_term}%", f"%{lowercase_search_term}%", f"%{lowercase_search_term}%"))
+        if products_table is None or products_table == ():
+            button_selected_product.config(state=tk.DISABLED)
+            button_selected_product.pack_forget()
+            messagebox.showerror("Database Error", "Could not retrieve products from the database.")
+            
+            return search_products()
+        search_products_cache[lowercase_search_term] = products_table
+        last_cached_products = time.time() 
+    products_table = search_products_cache[lowercase_search_term]
+
+   
+    columns = ("Product Name", "Price", "Stock Quantity", "Category", "Vendor Name", "Market Name")
+    products_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=max_height(len(products_table), 30))
+
+    products_tree.pack(padx=20, fill=tk.X)
+
+    for col in columns:
+        products_tree.heading(col, text=col)
+        products_tree.column(col, width=150)
+
+    for product in products_table:
+        products_tree.insert("", "end", values=product[1:7], iid=str(product[0]), tags=(product[7],))
+    
+    selected_table = "products"
+    selected_tree = products_tree
+
+
+def search_products():
+    clear_results()  # Clear previous results before displaying new ones
+    global selected_table, results_frame, last_cached_vendors, select_vendor_cache
+    
+    root.focus()
+    
+    button_clear_results.config(state=tk.NORMAL)
+
+    results_frame = tk.Frame(root)
+    results_frame.pack(anchor=tk.E, fill=tk.X)
+
+    search_frame = tk.Frame(results_frame)
+    search_frame.pack()
+
+    search_entry = tk.Entry(search_frame, width=30, font=("Helvetica", 11))
+    search_entry.pack(side=tk.LEFT)
+
+    button_search = tk.Button(search_frame, text="Search", command=lambda: perform_search(search_entry.get()))
+    button_search.pack(side=tk.LEFT)
+
+    unfocus(root, {search_entry})
+
+    search_entry_placeholder(search_entry, "Search Products...")
 
 
 
+## --- Place Pre Order Section ---
 def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_name, customer_email, price):
     connection = None
     query = ""
@@ -339,196 +548,11 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
         results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
         lable_pre_order_result = tk.Label(results_frame, text=f"{order_result[1]}", font=("Helvetica", 12))
         lable_pre_order_result.pack(pady=10, padx=(20,0))
-    
 
-last_cached_products = 0
-
-def select_product():
-    global selected_item, selected_tree, results_frame, selected_table
-    selected_item = selected_tree.selection()
-
-    if selected_table is None:
-        messagebox.showwarning("No Table Selected", "Please display a table before selecting an item.")
-        return None
-    
-    if not selected_item:
-        messagebox.showwarning("No Selection", "Please select a market from the list.")
-        return None
-    
-    product_id = selected_item[0]
-    product_values = selected_tree.item(selected_item, "values")
-
-    tags = selected_tree.item(selected_item, "tags")
-    description = tags[0] if tags else "No description available."
-
-    if results_frame:
-            results_frame.destroy()
-            results_frame = None
-
-    button_selected_product.pack_forget()
-    button_selected_product.config(state=tk.DISABLED)
-    
-
-    results_frame = tk.Frame(root)
-    results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
-
-    columns = ("Product Name", "Price", "Stock Quantity", "Category", "Vendor Name", "Market Name")
-    products_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=1)
-
-    products_tree.pack(padx=20, fill=tk.X)
-
-    for col in columns:
-        products_tree.heading(col, text=col)
-        products_tree.column(col, width=150)
+# ----- End of Main Functions -----
 
 
-    products_tree.insert("", "end", values=product_values[0:6], iid=str(product_id))
-        
-    description_columns = ("Description",)
-    products_description_tree = ttk.Treeview(results_frame, columns=description_columns, show="headings", height=1, selectmode="none")
-
-    products_description_tree.heading(description_columns, text=description_columns, anchor=tk.W)
-    products_description_tree.column(description_columns, width=150, anchor=tk.W)
-        
-    products_description_tree.insert("", "end", values=(description,), iid=str(product_id))
-
-    products_description_tree.pack(pady=(0, 10), padx=20, fill=tk.X)
-
-    place_pre_order_frame = tk.Frame(results_frame)
-    place_pre_order_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0))
-    
-    root.focus()
-
-    pre_order_date = tk.Entry(place_pre_order_frame, width=30, font=("Helvetica", 11))
-    pre_order_date.pack(padx=(20, 0), side=tk.LEFT)
-
-    pre_order_quantity = tk.Entry(place_pre_order_frame, width=20, font=("Helvetica", 11))
-    pre_order_quantity.pack(padx=(20, 0), side=tk.LEFT)
-
-    pre_order_customer_name = tk.Entry(place_pre_order_frame, width=30, font=("Helvetica", 11))
-    pre_order_customer_name.pack(padx=(20, 0), side=tk.LEFT)
-
-    pre_order_customer_email = tk.Entry(place_pre_order_frame, width=40, font=("Helvetica", 11))
-    pre_order_customer_email.pack(padx=(20, 0), side=tk.LEFT)
-
-    
-
-    # customer_name, customer_email, price
-    button_pre_order = tk.Button(place_pre_order_frame, text="Place Pre Order", command=lambda: place_pre_order(
-        product_id, 
-        pre_order_date.get(), 
-        pre_order_quantity.get(), 
-        pre_order_customer_name.get(), 
-        pre_order_customer_email.get(), 
-        product_values[1]
-        ))
-    button_pre_order.pack(padx=(0, 20), side=tk.RIGHT)
-
-    
-
-    unfocus(root, {pre_order_date, pre_order_quantity, pre_order_customer_name, pre_order_customer_email})
-
-    search_entry_placeholder(pre_order_date, "Date: (yyyy-mm-dd)")
-    search_entry_placeholder(pre_order_quantity, "Quantity: (number)")
-    search_entry_placeholder(pre_order_customer_name, "Name: (First Last)")
-    search_entry_placeholder(pre_order_customer_email, "Email: (example@gmail.com)")
-    
-
-def perform_search(search_term):
-    clear_results()  # Clear previous results before displaying new ones
-    
-    button_clear_results.pack_forget()
-    button_selected_product.pack(side=tk.LEFT, padx=(0, 20))
-    button_clear_results.pack(side=tk.LEFT, padx=(0, 20))
-
-    button_selected_product.config(state=tk.NORMAL)  
-    button_clear_results.config(state=tk.NORMAL)   
-    
-    global results_frame, search_products_cache, last_cached_products, selected_table, selected_tree
-
-    if time.time() - last_cached_products > 60 * 5:
-        last_cached_products = time.time()
-        search_products_cache = {}
-
-    results_frame = tk.Frame(root)
-    results_frame.pack(anchor=tk.W, fill=tk.X, pady=(10, 0)) 
-
-
-    if search_term not in search_products_cache:
-        query = """
-                SELECT product_id, p.name, price, stock_quantity, category, business_name, m.name, description
-                FROM Products p
-                JOIN Vendors v ON v.vendor_id = p.vendor_id
-                JOIN Market_Stalls ms ON ms.vendor_id = v.vendor_id
-                JOIN Markets m ON m.market_id = ms.market_id
-                WHERE p.name LIKE %s OR description LIKE %s
-                ORDER BY p.name;
-            """
-        products_table = run_query(query, (f"%{search_term}%", f"%{search_term}%"))
-        if products_table is None:
-            messagebox.showerror("Database Error", "Could not retrieve products from the database.")
-            
-            return search_products()
-        search_products_cache[search_term] = products_table
-        last_cached_products = time.time() 
-    products_table = search_products_cache[search_term]
-
-   
-    columns = ("Product Name", "Price", "Stock Quantity", "Category", "Vendor Name", "Market Name")
-    products_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=max_height(len(products_table)))
-
-    products_tree.pack(padx=20, fill=tk.X)
-
-    for col in columns:
-        products_tree.heading(col, text=col)
-        products_tree.column(col, width=150)
-
-
-    for product in products_table:
-        products_tree.insert("", "end", values=product[1:7], iid=str(product[0]), tags=(product[7],))
-    
-    
-    selected_table = "products"
-    selected_tree = products_tree
-
-
-def unfocus(root, buttons):
-    focused = False
-
-    def on_click(event):
-        for button in buttons:
-            if event.widget == button:
-                return
-        root.focus_set()
-
-
-    root.bind("<Button-1>", on_click)
-
-def search_products():
-    clear_results()  # Clear previous results before displaying new ones
-    root.focus()
-    
-    global selected_table, results_frame, last_cached_vendors, select_vendor_cache
-    button_clear_results.config(state=tk.NORMAL)
-
-    results_frame = tk.Frame(root)
-    results_frame.pack(anchor=tk.E, fill=tk.X)
-
-    search_frame = tk.Frame(results_frame)
-    search_frame.pack()
-
-    search_entry = tk.Entry(search_frame, width=30, font=("Helvetica", 11))
-    search_entry.pack(side=tk.LEFT)
-
-    button_search = tk.Button(search_frame, text="Search", command=lambda: perform_search(search_entry.get()))
-    button_search.pack(side=tk.LEFT)
-
-    unfocus(root, {search_entry})
-
-    search_entry_placeholder(search_entry, "Search Products...")
-
-
-# Tkinter GUI
+# Tkinter GUI setup
 WIDTH = 1200
 HEIGHT = 800
 
@@ -536,15 +560,17 @@ root = tk.Tk()
 root.title("Farmers Market Database")
 root.geometry(f"{WIDTH}x{HEIGHT}")
 
+if not load_dotenv():
+    messagebox.showerror(".env Error", ".env file not found or failed to load.")
 
-
+# Main Tkinter GUI
 title_label = tk.Label(root, text="Farmers Market Database", font=("Helvetica", 16))
 title_label.pack(pady=10)
 
 main_button_frame = tk.Frame(root)
 main_button_frame.pack(side=tk.TOP)
 
-
+# Displays all markerts.
 button_display_markets = tk.Button(main_button_frame, text="Browse Farmers Markets", command=display_markets)
 button_display_markets.pack(side=tk.LEFT, padx = (0,10))
 
@@ -552,24 +578,24 @@ button_search_products = tk.Button(main_button_frame, text="Search Products", co
 button_search_products.pack(side=tk.LEFT)
 
 
-
+# Holds the buttons
 button_frame = tk.Frame(root)
 button_frame.pack(anchor=tk.E, pady=0)
 
+# Used to select products that are found from the search.
 button_selected_product = tk.Button(button_frame, text="Select Product", command=select_product)
-button_selected_product.pack_forget()  # Hide the button initially
+button_selected_product.pack_forget() #Hide the button initially
 button_selected_product.config(state=tk.DISABLED)
 
+# Used to select markets that are displayed.
 button_selected = tk.Button(button_frame, text="Select Market", command=get_selected_market)
-button_selected.pack_forget()  # Hide the button initially
+button_selected.pack_forget() #Hide the button initially
 button_selected.config(state=tk.DISABLED)
 
+# Clearts the results.
 button_clear_results = tk.Button(button_frame, text="Clear Results", command=clear_results)
 button_clear_results.pack(side=tk.LEFT, padx=(0, 20))
 button_clear_results.config(state=tk.DISABLED)  
-
-
-
 
 
 root.mainloop()
