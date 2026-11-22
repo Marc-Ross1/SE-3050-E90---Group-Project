@@ -463,7 +463,7 @@ def place_pre_order(product_id, pre_order_date, pre_order_quantity, customer_nam
     params = None
 
     # Regex for input formats.
-    regex_pre_order_date = r"^\d{4}-(?:0[1-9]|1[0-2]),(?:0[1-9]|[12]\d|3[01])$"
+    regex_pre_order_date = r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$"
     regex_pre_order_quantity = r"^\d+$"
     regex_customer_name = r"^[A-Za-zÀ-ÿ]+(?: [A-Za-zÀ-ÿ]+)+$"
     regex_customer_email = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
