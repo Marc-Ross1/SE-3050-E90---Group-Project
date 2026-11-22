@@ -108,3 +108,7 @@ This web platform helps local farmers' markets manage operations and connect wit
 * `price_at_purchase` (decimal, NOT NULL): The snapshot price at checkout.
 
 
+# Database Application
+
+## Important
+The Application does not support Mac as .env files are not supported on that operating system.
