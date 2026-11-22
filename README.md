@@ -112,3 +112,8 @@ This web platform helps local farmers' markets manage operations and connect wit
 
 ## Important
 The Application does not support Mac as .env files are not supported on that operating system.
+
+## Database Management Application Demo Video
+[Watch/Download Demo Video] (https://github.com/Marc-Ross1/SE-3050-E90---Group-Project/releases/download/v1.0/SE.3050.E90.Database.Management.Application.Demo.Video.mp4)
+ 
+
